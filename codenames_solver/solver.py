@@ -118,7 +118,7 @@ class Solver:
         max_clues: int = 5,
         max_count: int = 4,
         candidates_per_query: int = 75,
-        reranker_top_k: int = 30,
+        reranker_top_k: int = 75,
     ) -> list[ClueSuggestion]:
         target_words = [w.lower() for w in target_words]
         avoid_words = [w.lower() for w in avoid_words]
