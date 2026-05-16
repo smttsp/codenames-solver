@@ -155,3 +155,5 @@ wandb/**
 **.json
 **.tar
 **.tar.gz
+
+.claude
