@@ -7,7 +7,7 @@ load_dotenv()
 DATA_DIR = Path.home() / ".codenames_solver"
 CHROMA_DIR = DATA_DIR / "chroma"
 
-EMBEDDING_MODEL = "voyage-3-large"
+EMBEDDING_MODEL = "voyage-4-large"
 VISION_MODEL = "gpt-5.4"
 COLLECTION_NAME = "english_words"
 

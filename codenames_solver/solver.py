@@ -82,20 +82,25 @@ class Solver:
         raw_assassin = float((embs.assassin @ cand_emb).max()) if embs.assassin.size else 0.0
         if embs.avoid.size:
             avoid_sims = embs.avoid @ cand_emb
-            # Use the Kth-highest avoid similarity so one rogue avoid word doesn't
-            # kill an otherwise good clue. Assassin always uses the absolute max.
+            avoid_max = float(avoid_sims.max())
+            # Lenient threshold for coverage counting: ignore the single closest avoid word
+            # so one rogue avoid word doesn't prevent counting legitimate target coverage.
             k = min(AVOID_DANGER_TOP_K, len(avoid_sims))
-            raw_avoid = float(np.partition(avoid_sims, -k)[-k])
+            avoid_lenient = float(np.partition(avoid_sims, -k)[-k])
         else:
-            raw_avoid = 0.0
-        raw_danger = max(raw_avoid, raw_assassin)
+            avoid_max = 0.0
+            avoid_lenient = 0.0
+
+        # Coverage threshold is lenient (top-k avoid) to count more covered targets.
+        coverage_danger = max(avoid_lenient, raw_assassin)
+        # Score penalty uses strict max avoid so risky clues (e.g. HEAT near FIRE) rank lower.
+        score_danger = max(avoid_max, raw_assassin)
 
         order = np.argsort(-t_sims)
 
-        # Count target words whose similarity exceeds the raw danger threshold.
         best_k = 0
         for j in range(len(target_words)):
-            if float(t_sims[order[j]]) > raw_danger:
+            if float(t_sims[order[j]]) > coverage_danger:
                 best_k = j + 1
             else:
                 break
@@ -103,10 +108,8 @@ class Solver:
 
         best_covered = [target_words[int(order[i])] for i in range(best_k)]
         avg_target_sim = float(t_sims[order[:best_k]].mean())
-        # Margin: how much better the clue is for targets vs. the most dangerous board word.
-        # Extra assassin penalty only kicks in when assassin is closer than any avoid word.
-        assassin_extra = max(0.0, raw_assassin - raw_avoid) * ASSASSIN_PENALTY
-        best_score = avg_target_sim - raw_danger - assassin_extra
+        assassin_extra = max(0.0, raw_assassin - avoid_max) * ASSASSIN_PENALTY
+        best_score = avg_target_sim - score_danger - assassin_extra
 
         return ClueSuggestion(clue=word, count=best_k, target_words=best_covered, score=best_score)
 
@@ -142,6 +145,11 @@ class Solver:
 
         if self.reranker is not None:
             top_candidates = [s.clue for s in suggestions[:reranker_top_k]]
-            suggestions = self.reranker.rerank(top_candidates, target_words, avoid_words, assassin_words)
+            suggestions = self.reranker.rerank(
+                top_candidates, target_words, avoid_words, assassin_words,
+                avoid_embs=embs.avoid,
+                assassin_embs=embs.assassin,
+                get_embedding_fn=self.embedder.encode,
+            )
 
         return suggestions[:max_clues]
