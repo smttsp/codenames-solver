@@ -308,6 +308,7 @@ dependencies = [
     { name = "pillow" },
     { name = "pydantic" },
     { name = "pytest" },
+    { name = "python-dotenv" },
     { name = "ruff" },
     { name = "tqdm" },
 ]
@@ -329,6 +330,7 @@ requires-dist = [
     { name = "pillow", specifier = ">=10.0.0" },
     { name = "pydantic", specifier = ">=2.0.0" },
     { name = "pytest", specifier = ">=8.3.4" },
+    { name = "python-dotenv", specifier = ">=1.0.0" },
     { name = "ruff", specifier = ">=0.9.5" },
     { name = "tqdm", specifier = ">=4.66.0" },
 ]
