@@ -60,7 +60,7 @@ def train(force: bool) -> None:
     click.echo(
         f"Filtered corpus: {len(filtered):,} words. Starting embedding (this may take a few minutes)..."
     )
-
+    filtered = filtered[:100]
     embedder = Embedder()
     embeddings = embedder.encode(
         filtered, batch_size=EMBEDDING_BATCH_SIZE, show_progress=True
