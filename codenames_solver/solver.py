@@ -5,7 +5,7 @@ from itertools import combinations
 
 import numpy as np
 
-from codenames_solver.config import ASSASSIN_PENALTY, AVOID_PENALTY
+from codenames_solver.config import ASSASSIN_PENALTY
 from codenames_solver.embedder import Embedder
 from codenames_solver.vectordb import VectorDB
 
@@ -79,8 +79,6 @@ class Solver:
         # Use raw (unpenalized) danger sim as the coverage threshold: a target word is
         # "covered" only if the clue is more similar to it than to any danger word.
         raw_danger = max(raw_avoid, raw_assassin)
-        # Penalty-weighted danger for final score ranking.
-        danger = max(raw_avoid * AVOID_PENALTY, raw_assassin * ASSASSIN_PENALTY)
 
         order = np.argsort(-t_sims)
 
@@ -94,7 +92,11 @@ class Solver:
         best_k = max(1, best_k)
 
         best_covered = [target_words[int(order[i])] for i in range(best_k)]
-        best_score = float(t_sims[order[:best_k]].mean()) - danger
+        avg_target_sim = float(t_sims[order[:best_k]].mean())
+        # Margin: how much better the clue is for targets vs. the most dangerous board word.
+        # Extra assassin penalty only kicks in when assassin is closer than any avoid word.
+        assassin_extra = max(0.0, raw_assassin - raw_avoid) * ASSASSIN_PENALTY
+        best_score = avg_target_sim - raw_danger - assassin_extra
 
         return ClueSuggestion(clue=word, count=best_k, target_words=best_covered, score=best_score)
 
@@ -105,7 +107,7 @@ class Solver:
         assassin_words: list[str],
         max_clues: int = 5,
         max_count: int = 4,
-        candidates_per_query: int = 30,
+        candidates_per_query: int = 75,
     ) -> list[ClueSuggestion]:
         target_words = [w.lower() for w in target_words]
         avoid_words = [w.lower() for w in avoid_words]
