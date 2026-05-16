@@ -90,7 +90,7 @@ class LLMReranker:
         avoid_embs: np.ndarray | None = None,
         assassin_embs: np.ndarray | None = None,
         get_embedding_fn=None,
-        n_generated: int = 20,
+        n_generated: int = 40,
     ) -> list[ClueSuggestion]:
         if not candidates and not target_words:
             return []
@@ -118,10 +118,10 @@ class LLMReranker:
 
         all_suggestions = _parse_items(eval_raw, target_set) + _parse_items(gen_raw, target_set)
 
-        # Merge: best score per clue, exclude board words
+        # Merge: best score per clue, exclude board words and zero-coverage clues
         merged: dict[str, ClueSuggestion] = {}
         for s in all_suggestions:
-            if s.clue in board_words:
+            if s.clue in board_words or s.count == 0:
                 continue
             if s.clue not in merged or s.score > merged[s.clue].score:
                 merged[s.clue] = s
