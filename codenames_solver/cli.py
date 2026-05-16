@@ -40,18 +40,21 @@ def train(force: bool, limit: int) -> None:
     """Embed the English word corpus and persist it to the local vector DB."""
     db = VectorDB()
 
-    click.echo("Downloading NLTK words corpus...")
+    click.echo("Downloading NLTK corpora...")
     nltk.download("words", quiet=True)
+    nltk.download("brown", quiet=True)
+    from nltk.corpus import brown
     from nltk.corpus import words as nltk_words
+    from nltk.probability import FreqDist
 
-    raw = nltk_words.words()
-    filtered = sorted(
-        {
-            w.lower()
-            for w in raw
-            if w.isalpha() and MIN_WORD_LEN <= len(w) <= MAX_WORD_LEN
-        }
-    )
+    valid_words = {
+        w.lower()
+        for w in nltk_words.words()
+        if w.isalpha() and MIN_WORD_LEN <= len(w) <= MAX_WORD_LEN
+    }
+
+    fdist = FreqDist(w.lower() for w in brown.words() if w.isalpha())
+    filtered = sorted(valid_words, key=lambda w: fdist[w], reverse=True)
 
     if limit > 0:
         filtered = filtered[:limit]
