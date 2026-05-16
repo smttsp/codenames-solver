@@ -35,7 +35,7 @@ def cli() -> None:
 
 @cli.command()
 @click.option("--force", is_flag=True, help="Re-embed all words even if already in DB.")
-@click.option("--limit", default=500, show_default=True, help="Max words to train on (0 = no limit).")
+@click.option("--limit", default=5000, show_default=True, help="Max words to train on (0 = no limit).")
 def train(force: bool, limit: int) -> None:
     """Embed the English word corpus and persist it to the local vector DB."""
     db = VectorDB()
