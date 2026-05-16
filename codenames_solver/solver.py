@@ -74,23 +74,27 @@ class Solver:
     ) -> ClueSuggestion:
         t_sims = embs.target @ cand_emb
 
-        danger = 0.0
-        if embs.avoid.size:
-            danger = max(danger, float((embs.avoid @ cand_emb).max()) * AVOID_PENALTY)
-        if embs.assassin.size:
-            danger = max(danger, float((embs.assassin @ cand_emb).max()) * ASSASSIN_PENALTY)
+        raw_avoid = float((embs.avoid @ cand_emb).max()) if embs.avoid.size else 0.0
+        raw_assassin = float((embs.assassin @ cand_emb).max()) if embs.assassin.size else 0.0
+        # Use raw (unpenalized) danger sim as the coverage threshold: a target word is
+        # "covered" only if the clue is more similar to it than to any danger word.
+        raw_danger = max(raw_avoid, raw_assassin)
+        # Penalty-weighted danger for final score ranking.
+        danger = max(raw_avoid * AVOID_PENALTY, raw_assassin * ASSASSIN_PENALTY)
 
         order = np.argsort(-t_sims)
-        best_score = float("-inf")
-        best_k = 1
-        best_covered = [target_words[int(order[0])]]
 
-        for j in range(1, len(target_words) + 1):
-            score = float(t_sims[order[:j]].mean()) - danger
-            if score > best_score:
-                best_score = score
-                best_k = j
-                best_covered = [target_words[int(order[i])] for i in range(j)]
+        # Count target words whose similarity exceeds the raw danger threshold.
+        best_k = 0
+        for j in range(len(target_words)):
+            if float(t_sims[order[j]]) > raw_danger:
+                best_k = j + 1
+            else:
+                break
+        best_k = max(1, best_k)
+
+        best_covered = [target_words[int(order[i])] for i in range(best_k)]
+        best_score = float(t_sims[order[:best_k]].mean()) - danger
 
         return ClueSuggestion(clue=word, count=best_k, target_words=best_covered, score=best_score)
 
