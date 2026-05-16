@@ -18,10 +18,81 @@ class ClueSuggestion:
     score: float
 
 
+@dataclass
+class _BoardEmbeddings:
+    target: np.ndarray
+    avoid: np.ndarray
+    assassin: np.ndarray
+
+
 class Solver:
     def __init__(self, embedder: Embedder, db: VectorDB) -> None:
         self.embedder = embedder
         self.db = db
+
+    def _encode_board(
+        self,
+        target_words: list[str],
+        avoid_words: list[str],
+        assassin_words: list[str],
+    ) -> _BoardEmbeddings:
+        all_words = target_words + avoid_words + assassin_words
+        embs = self.embedder.encode(all_words)
+        n_t, n_a = len(target_words), len(avoid_words)
+        return _BoardEmbeddings(
+            target=embs[:n_t],
+            avoid=embs[n_t : n_t + n_a],
+            assassin=embs[n_t + n_a :],
+        )
+
+    def _gather_candidates(
+        self,
+        target_embs: np.ndarray,
+        board_words: set[str],
+        max_count: int,
+        candidates_per_query: int,
+    ) -> list[str]:
+        n_t = len(target_embs)
+        candidates: set[str] = set()
+        for k in range(min(max_count, n_t), 0, -1):
+            for indices in combinations(range(n_t), k):
+                subset = target_embs[list(indices)]
+                centroid = subset.mean(axis=0)
+                centroid /= np.linalg.norm(centroid)
+                results = self.db.query(
+                    centroid, n_results=candidates_per_query, exclude=board_words
+                )
+                candidates.update(w for w, _ in results)
+        return list(candidates)
+
+    def _score_candidate(
+        self,
+        word: str,
+        cand_emb: np.ndarray,
+        embs: _BoardEmbeddings,
+        target_words: list[str],
+    ) -> ClueSuggestion:
+        t_sims = embs.target @ cand_emb
+
+        danger = 0.0
+        if embs.avoid.size:
+            danger = max(danger, float((embs.avoid @ cand_emb).max()) * AVOID_PENALTY)
+        if embs.assassin.size:
+            danger = max(danger, float((embs.assassin @ cand_emb).max()) * ASSASSIN_PENALTY)
+
+        order = np.argsort(-t_sims)
+        best_score = float("-inf")
+        best_k = 1
+        best_covered = [target_words[int(order[0])]]
+
+        for j in range(1, len(target_words) + 1):
+            score = float(t_sims[order[:j]].mean()) - danger
+            if score > best_score:
+                best_score = score
+                best_k = j
+                best_covered = [target_words[int(order[i])] for i in range(j)]
+
+        return ClueSuggestion(clue=word, count=best_k, target_words=best_covered, score=best_score)
 
     def suggest(
         self,
@@ -37,67 +108,18 @@ class Solver:
         assassin_words = [w.lower() for w in assassin_words]
         board_words = set(target_words + avoid_words + assassin_words)
 
-        # Encode all board words in one API call
-        all_board = target_words + avoid_words + assassin_words
-        board_embs = self.embedder.encode(all_board)
-
-        n_t = len(target_words)
-        n_a = len(avoid_words)
-        target_embs = board_embs[:n_t]
-        avoid_embs = board_embs[n_t : n_t + n_a]
-        assassin_embs = board_embs[n_t + n_a :]
-
-        # Query DB with centroids of all k-subsets of target words
-        candidates: set[str] = set()
-        for k in range(min(max_count, n_t), 0, -1):
-            for indices in combinations(range(n_t), k):
-                subset = target_embs[list(indices)]
-                centroid = subset.mean(axis=0)
-                centroid /= np.linalg.norm(centroid)
-                results = self.db.query(
-                    centroid, n_results=candidates_per_query, exclude=board_words
-                )
-                candidates.update(w for w, _ in results)
+        embs = self._encode_board(target_words, avoid_words, assassin_words)
+        candidates = self._gather_candidates(
+            embs.target, board_words, max_count, candidates_per_query
+        )
 
         if not candidates:
             return []
 
-        # Batch-fetch all candidate embeddings from DB (one round-trip)
-        cand_list = list(candidates)
-        found_ids, cand_embs = self.db.get_embeddings(cand_list)
-
-        suggestions: list[ClueSuggestion] = []
-        for word, cand_emb in zip(found_ids, cand_embs):
-            t_sims = target_embs @ cand_emb  # (n_t,)
-            a_sims = avoid_embs @ cand_emb  # (n_a,) or (0,)
-            assr_sims = assassin_embs @ cand_emb  # (n_assr,) or (0,)
-
-            danger = 0.0
-            if a_sims.size:
-                danger = max(danger, float(a_sims.max()) * AVOID_PENALTY)
-            if assr_sims.size:
-                danger = max(danger, float(assr_sims.max()) * ASSASSIN_PENALTY)
-
-            # Find optimal k: how many targets to claim with this clue
-            order = np.argsort(-t_sims)
-            best_score = float("-inf")
-            best_k = 1
-            best_covered = [target_words[int(order[0])]]
-
-            for j in range(1, n_t + 1):
-                mean_sim = float(t_sims[order[:j]].mean())
-                score = mean_sim - danger
-                if score > best_score:
-                    best_score = score
-                    best_k = j
-                    best_covered = [target_words[int(order[i])] for i in range(j)]
-
-            suggestions.append(
-                ClueSuggestion(
-                    clue=word, count=best_k, target_words=best_covered, score=best_score
-                )
-            )
-
-        # Primary: more words covered is better; secondary: higher score
+        found_ids, cand_embs = self.db.get_embeddings(candidates)
+        suggestions = [
+            self._score_candidate(word, cand_emb, embs, target_words)
+            for word, cand_emb in zip(found_ids, cand_embs)
+        ]
         suggestions.sort(key=lambda x: (-x.count, -x.score))
         return suggestions[:max_clues]
