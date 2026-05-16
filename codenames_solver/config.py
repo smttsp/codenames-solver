@@ -8,13 +8,15 @@ DATA_DIR = Path.home() / ".codenames_solver"
 CHROMA_DIR = DATA_DIR / "chroma"
 
 EMBEDDING_MODEL = "voyage-3-large"
-VISION_MODEL = "gpt-4o"
+VISION_MODEL = "gpt-4o-2024-11-20"
 COLLECTION_NAME = "english_words"
 
-EMBEDDING_BATCH_SIZE = 500  # OpenAI accepts up to 2048 inputs per request
+EMBEDDING_BATCH_SIZE = 128  # Voyage AI accepts up to 128 inputs per request
 MIN_WORD_LEN = 3
 MAX_WORD_LEN = 15
 
-# Scoring penalties (multiplied by cosine similarity)
-AVOID_PENALTY = 1.0   # kept for API compat; no longer used as multiplier
 ASSASSIN_PENALTY = 0.3  # extra additive penalty if assassin is closer than avoid
+RERANKER_MODEL = "claude-haiku-4-5-20251001"  # fast + cheap; swap for claude-sonnet-4-6 for higher quality
+# How many of the top avoid-word similarities a clue must beat to count as covering a target.
+# 1 = must beat every avoid word (strict); 2 = one avoid word may be closer (recommended).
+AVOID_DANGER_TOP_K = 2

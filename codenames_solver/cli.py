@@ -9,11 +9,15 @@ from codenames_solver.solver import Solver
 from codenames_solver.vectordb import VectorDB
 
 
-def _create_solver() -> Solver:
+def _create_solver(rerank: bool = False) -> Solver:
     db = VectorDB()
     if db.count() == 0:
         raise click.ClickException("Vector DB is empty. Run `codenames train` first.")
-    return Solver(Embedder(), db)
+    reranker = None
+    if rerank:
+        from codenames_solver.reranker import LLMReranker
+        reranker = LLMReranker()
+    return Solver(Embedder(), db, reranker=reranker)
 
 
 def _print_suggestions(suggestions: list, /) -> None:
@@ -109,12 +113,14 @@ def train(force: bool, limit: int) -> None:
     show_default=True,
     help="Max words a single clue may cover.",
 )
+@click.option("--rerank", is_flag=True, help="Use LLM reranker for higher quality clues.")
 def solve(
     team_words: str,
     avoid_words: str,
     assassin_words: str,
     top: int,
     max_count: int,
+    rerank: bool,
 ) -> None:
     """Find the best clue words for a manually specified board state."""
     targets = [w.strip() for w in team_words.split(",") if w.strip()]
@@ -131,7 +137,9 @@ def solve(
         click.echo(f"Assassin   : {', '.join(assassins)}")
     click.echo()
 
-    solver = _create_solver()
+    solver = _create_solver(rerank=rerank)
+    if rerank:
+        click.echo("Reranking with LLM...")
     suggestions = solver.suggest(targets, avoids, assassins, max_clues=top, max_count=max_count)
     _print_suggestions(suggestions)
 
@@ -159,7 +167,8 @@ def solve(
     show_default=True,
     help="Max words a single clue may cover.",
 )
-def infer(image: str, team: str, top: int, max_count: int) -> None:
+@click.option("--rerank", is_flag=True, help="Use LLM reranker for higher quality clues.")
+def infer(image: str, team: str, top: int, max_count: int, rerank: bool) -> None:
     """Parse a board screenshot and suggest clues automatically."""
     from codenames_solver.board_parser import BoardParser
 
@@ -181,7 +190,9 @@ def infer(image: str, team: str, top: int, max_count: int) -> None:
         )
 
     click.echo("\nFinding clues...")
-    solver = _create_solver()
+    solver = _create_solver(rerank=rerank)
+    if rerank:
+        click.echo("Reranking with LLM...")
     suggestions = solver.suggest(
         team_words, avoid_words, board.black, max_clues=top, max_count=max_count
     )

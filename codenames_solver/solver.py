@@ -2,12 +2,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from itertools import combinations
+from typing import TYPE_CHECKING
 
 import numpy as np
 
-from codenames_solver.config import ASSASSIN_PENALTY
+from codenames_solver.config import ASSASSIN_PENALTY, AVOID_DANGER_TOP_K
 from codenames_solver.embedder import Embedder
 from codenames_solver.vectordb import VectorDB
+
+if TYPE_CHECKING:
+    from codenames_solver.reranker import LLMReranker
 
 
 @dataclass
@@ -26,9 +30,10 @@ class _BoardEmbeddings:
 
 
 class Solver:
-    def __init__(self, embedder: Embedder, db: VectorDB) -> None:
+    def __init__(self, embedder: Embedder, db: VectorDB, reranker: LLMReranker | None = None) -> None:
         self.embedder = embedder
         self.db = db
+        self.reranker = reranker
 
     def _encode_board(
         self,
@@ -74,10 +79,15 @@ class Solver:
     ) -> ClueSuggestion:
         t_sims = embs.target @ cand_emb
 
-        raw_avoid = float((embs.avoid @ cand_emb).max()) if embs.avoid.size else 0.0
         raw_assassin = float((embs.assassin @ cand_emb).max()) if embs.assassin.size else 0.0
-        # Use raw (unpenalized) danger sim as the coverage threshold: a target word is
-        # "covered" only if the clue is more similar to it than to any danger word.
+        if embs.avoid.size:
+            avoid_sims = embs.avoid @ cand_emb
+            # Use the Kth-highest avoid similarity so one rogue avoid word doesn't
+            # kill an otherwise good clue. Assassin always uses the absolute max.
+            k = min(AVOID_DANGER_TOP_K, len(avoid_sims))
+            raw_avoid = float(np.partition(avoid_sims, -k)[-k])
+        else:
+            raw_avoid = 0.0
         raw_danger = max(raw_avoid, raw_assassin)
 
         order = np.argsort(-t_sims)
@@ -108,6 +118,7 @@ class Solver:
         max_clues: int = 5,
         max_count: int = 4,
         candidates_per_query: int = 75,
+        reranker_top_k: int = 30,
     ) -> list[ClueSuggestion]:
         target_words = [w.lower() for w in target_words]
         avoid_words = [w.lower() for w in avoid_words]
@@ -128,4 +139,9 @@ class Solver:
             for word, cand_emb in zip(found_ids, cand_embs)
         ]
         suggestions.sort(key=lambda x: (-x.count, -x.score))
+
+        if self.reranker is not None:
+            top_candidates = [s.clue for s in suggestions[:reranker_top_k]]
+            suggestions = self.reranker.rerank(top_candidates, target_words, avoid_words, assassin_words)
+
         return suggestions[:max_clues]

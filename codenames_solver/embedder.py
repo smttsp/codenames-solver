@@ -5,10 +5,6 @@ import voyageai
 
 from codenames_solver.config import EMBEDDING_BATCH_SIZE, EMBEDDING_MODEL
 
-# Voyage AI max inputs per request
-_VOYAGE_BATCH_LIMIT = 128
-
-
 class Embedder:
     def __init__(self, model: str = EMBEDDING_MODEL) -> None:
         self._client = voyageai.Client()
@@ -20,18 +16,17 @@ class Embedder:
         batch_size: int = EMBEDDING_BATCH_SIZE,
         show_progress: bool = False,
     ) -> np.ndarray:
-        effective_batch = min(batch_size, _VOYAGE_BATCH_LIMIT)
         all_embeddings: list[list[float]] = []
 
-        ranges = range(0, len(texts), effective_batch)
+        ranges = range(0, len(texts), batch_size)
         if show_progress:
             from tqdm import tqdm
 
             ranges = tqdm(ranges, desc="Embedding", unit="batch")  # type: ignore[assignment]
 
         for i in ranges:
-            batch = texts[i : i + effective_batch]
-            result = self._client.embed(batch, model=self._model, input_type="query")
+            batch = texts[i : i + batch_size]
+            result = self._client.embed(batch, model=self._model)
             all_embeddings.extend(result.embeddings)
 
         arr = np.array(all_embeddings, dtype=np.float32)
