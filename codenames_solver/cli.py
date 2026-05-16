@@ -9,6 +9,25 @@ from codenames_solver.solver import Solver
 from codenames_solver.vectordb import VectorDB
 
 
+def _create_solver() -> Solver:
+    db = VectorDB()
+    if db.count() == 0:
+        raise click.ClickException("Vector DB is empty. Run `codenames train` first.")
+    return Solver(Embedder(), db)
+
+
+def _print_suggestions(suggestions: list, /) -> None:
+    if not suggestions:
+        click.echo("No suggestions found.")
+        return
+    click.echo("\nTop clues:")
+    for i, s in enumerate(suggestions, 1):
+        covered = ", ".join(s.target_words)
+        click.echo(
+            f"  {i}. {s.clue.upper():20s} ({s.count})  →  {covered}   [score: {s.score:.3f}]"
+        )
+
+
 @click.group()
 def cli() -> None:
     """Codenames Solver — AI-powered spymaster clue suggestions."""
@@ -88,13 +107,6 @@ def solve(
     if not targets:
         raise click.UsageError("--team requires at least one word.")
 
-    db = VectorDB()
-    if db.count() == 0:
-        raise click.ClickException("Vector DB is empty. Run `codenames train` first.")
-
-    embedder = Embedder()
-    solver = Solver(embedder, db)
-
     click.echo(f"\nYour words : {', '.join(targets)}")
     if avoids:
         click.echo(f"Avoid      : {', '.join(avoids)}")
@@ -102,20 +114,9 @@ def solve(
         click.echo(f"Assassin   : {', '.join(assassins)}")
     click.echo()
 
-    suggestions = solver.suggest(
-        targets, avoids, assassins, max_clues=top, max_count=max_count
-    )
-
-    if not suggestions:
-        click.echo("No suggestions found. Try broadening your word list.")
-        return
-
-    click.echo("Top clues:")
-    for i, s in enumerate(suggestions, 1):
-        covered = ", ".join(s.target_words)
-        click.echo(
-            f"  {i}. {s.clue.upper():20s} ({s.count})  →  {covered}   [score: {s.score:.3f}]"
-        )
+    solver = _create_solver()
+    suggestions = solver.suggest(targets, avoids, assassins, max_clues=top, max_count=max_count)
+    _print_suggestions(suggestions)
 
 
 @cli.command()
@@ -143,10 +144,10 @@ def solve(
 )
 def infer(image: str, team: str, top: int, max_count: int) -> None:
     """Parse a board screenshot and suggest clues automatically."""
-    from codenames_solver.board_parser import parse_screenshot
+    from codenames_solver.board_parser import BoardParser
 
     click.echo(f"Parsing screenshot with GPT-4o ({image})...")
-    board = parse_screenshot(image, team=team)
+    board = BoardParser().parse(image)
 
     team_words = board.blue if team == "blue" else board.red
     opponent_words = board.red if team == "blue" else board.blue
@@ -162,25 +163,9 @@ def infer(image: str, team: str, top: int, max_count: int) -> None:
             "No words found for your team. Check the screenshot or team color."
         )
 
-    db = VectorDB()
-    if db.count() == 0:
-        raise click.ClickException("Vector DB is empty. Run `codenames train` first.")
-
-    embedder = Embedder()
-    solver = Solver(embedder, db)
-
     click.echo("\nFinding clues...")
+    solver = _create_solver()
     suggestions = solver.suggest(
         team_words, avoid_words, board.black, max_clues=top, max_count=max_count
     )
-
-    if not suggestions:
-        click.echo("No suggestions found.")
-        return
-
-    click.echo("\nTop clues:")
-    for i, s in enumerate(suggestions, 1):
-        covered = ", ".join(s.target_words)
-        click.echo(
-            f"  {i}. {s.clue.upper():20s} ({s.count})  →  {covered}   [score: {s.score:.3f}]"
-        )
+    _print_suggestions(suggestions)
