@@ -10,7 +10,12 @@ from codenames_solver.solver import ClueSuggestion
 _SYSTEM = """\
 You are an expert Codenames spymaster evaluator. You understand the game deeply:
 a clue word must connect to your team's words through meaning, category, or association,
-while being safely unrelated to opponent, neutral, and especially assassin words.\
+while being safely unrelated to opponent, neutral, and especially assassin words.
+
+Covering MORE team words with a single clue is the primary goal. A clue that safely
+covers 3 words is far superior to a perfect clue for 1 word. Always stretch to find
+every plausible connection a clue has to team words — think about categories, themes,
+double meanings, cultural references, and indirect associations.\
 """
 
 _USER_TMPL = """\
@@ -19,17 +24,20 @@ Board state:
   Avoid words  (opponent + neutral — dangerous if guessed): {avoids}
   Assassin     (instant loss if guessed): {assassins}
 
-Evaluate each candidate clue below. For each, decide:
-- Which team words does it connect to? (list only genuine connections, most relevant first)
-- Is it dangerously close to any avoid or assassin word?
-- Overall quality score: 0–10  (10 = brilliant multi-word clue, 0 = useless or dangerous)
+Evaluate each candidate clue. For each:
+1. List ALL team words it genuinely connects to — be creative but honest. Think hard
+   about indirect links: shared categories, cultural associations, compound words,
+   idiomatic phrases. Do NOT leave out weak-but-real connections.
+2. Check if it's dangerously close to any avoid/assassin word.
+3. Score 0–10 based on connection strength AND number of team words covered.
+   Covering 3 words weakly (6/10 each) beats covering 1 word perfectly.
 
 Candidate clues:
 {candidates}
 
 Return a JSON array — one object per candidate — with keys:
   "clue"    : the word (lowercase)
-  "covers"  : list of team words it connects to
+  "covers"  : list of team words it connects to (include all genuine connections)
   "score"   : float 0–10
   "reason"  : one sentence
 
@@ -76,10 +84,12 @@ class LLMReranker:
         for item in items:
             clue = item["clue"].lower()
             covers = [w.lower() for w in item.get("covers", []) if w.lower() in target_set]
-            score = float(item.get("score", 0)) / 10.0
+            raw_score = float(item.get("score", 0)) / 10.0
+            # Add a bonus per extra covered word so a 3-word clue at 0.6 beats a 1-word clue at 0.9.
+            boosted_score = raw_score + (len(covers) - 1) * 0.25
             suggestions.append(
-                ClueSuggestion(clue=clue, count=len(covers), target_words=covers, score=score)
+                ClueSuggestion(clue=clue, count=len(covers), target_words=covers, score=boosted_score)
             )
 
-        suggestions.sort(key=lambda x: (-x.count, -x.score))
+        suggestions.sort(key=lambda x: -x.score)
         return suggestions
