@@ -1,13 +1,23 @@
 [project]
-name = "example_template"
+name = "codenames-solver"
 version = "0.1.0"
-description = "This is a template example for python packages"
+description = "AI-powered spymaster clue suggestions for the Codenames board game"
 authors = [
   { name = "samet", email = "samettaspinarx@gmail.com" }
 ]
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "openai>=1.30.0",
+    "langchain>=0.3.0",
+    "langchain-openai>=0.2.0",
+    "chromadb>=0.5.0",
+    "nltk>=3.9.0",
+    "click>=8.1.0",
+    "tqdm>=4.66.0",
+    "pillow>=10.0.0",
+    "numpy>=2.0.0",
+    "pydantic>=2.0.0",
     "pytest>=8.3.4",
     "ruff>=0.9.5",
 ]
@@ -15,7 +25,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
-    "numpy>=2.2.2",
+    "ipython>=8.0.0",
 ]
 
 [build-system]
@@ -103,6 +113,8 @@ ignore = [
   "G004",
   "E501",
   "ISC001",
+  "SLOT000",  # Pydantic BaseModel subclasses don't need __slots__
+  "ANN401",   # Dynamically typed expressions (Any) are allowed in some places
   # = Require public symbols to be documented
   # Disabled for now. May make sense to enable it at some point.
   "D100",
