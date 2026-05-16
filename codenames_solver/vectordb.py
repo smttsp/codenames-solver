@@ -19,12 +19,15 @@ class VectorDB:
     def count(self) -> int:
         return self._col.count()
 
-    def upsert(self, words: list[str], embeddings: np.ndarray) -> None:
-        self._col.upsert(
-            ids=words,
-            embeddings=embeddings.tolist(),
-            documents=words,
-        )
+    def upsert(self, words: list[str], embeddings: np.ndarray, batch_size: int = 5000) -> None:
+        for i in range(0, len(words), batch_size):
+            batch_words = words[i : i + batch_size]
+            batch_embeddings = embeddings[i : i + batch_size].tolist()
+            self._col.upsert(
+                ids=batch_words,
+                embeddings=batch_embeddings,
+                documents=batch_words,
+            )
 
     def query(
         self,
