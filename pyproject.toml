@@ -1,0 +1,132 @@
+[project]
+name = "example_template"
+version = "0.1.0"
+description = "This is a template example for python packages"
+authors = [
+  { name = "samet", email = "samettaspinarx@gmail.com" }
+]
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "pytest>=8.3.4",
+    "ruff>=0.9.5",
+]
+
+
+[dependency-groups]
+dev = [
+    "numpy>=2.2.2",
+]
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+
+[tool.pytest.ini_options]
+addopts = ["-ra", "-q"]
+asyncio_mode = "auto"
+pythonpath = ["."]
+python_files = ["*__ut.py", "*__it.py"]
+markers = ["integration", "unit"]
+
+
+[tool.ruff]
+# Keep in sync with tool.poetry.dependencies below
+target-version = "py312"
+unsafe-fixes = false
+force-exclude = false
+
+
+[tool.ruff.lint]
+# Roughly follow order on https://docs.astral.sh/ruff/rules/
+select = [
+  "F",
+  "E",
+  "W",
+  "I",
+  #  "N",
+  #  "D", # pydocstyle - docstring code style https://docs.astral.sh/ruff/rules/#pydocstyle-d
+  "UP",
+  "YTT",
+  "ANN",
+  "ARG001",
+  "ASYNC",
+  #  "S",
+  "A",
+  "C4",
+  "DTZ",
+  "T10",
+  #  "T20",
+  #  "ERA",
+  #  "EXE",
+  "ISC",
+  "ICN001",
+  "LOG",
+  "G",
+  "PIE",
+  "PYI",
+  "PT",
+  "RSE",
+  #  "SLF",
+  "SLOT",
+  #  "SIM",
+  "TID",
+  "INT",
+  "PTH",
+  "PD",
+  "PGH",
+  "PLE",
+  #  # Many too opionated, cherry-pick some particularly good ones.
+  "PLR01",
+  "PLR02",
+  "PLR04",
+  "SIM101",
+  "PLR171",
+  "PLR172",
+  "PLR173",
+  "PLR2044",
+  "PLR5",
+  #  "PLR61",
+  "PLR2004",
+  "PLW",
+  "FLY",
+  "NPY",
+  "PERF",
+  "FURB",
+  "RUF",
+  "F401",
+  "F841",
+  "F842",
+]
+ignore = [
+  "G004",
+  "E501",
+  "ISC001",
+  # = Require public symbols to be documented
+  # Disabled for now. May make sense to enable it at some point.
+  "D100",
+  "D101",
+  "D102",
+  "D103",
+  "D104",
+  "D105",
+  "D106",
+  "D107",
+  "D105",
+  "D205", # We don't have summaries and descriptions in many places
+  # = Require every argument to be documented
+  # Disabled because we may want examples to appear on new lines and a blank line is required for that
+  "D412",
+  # Disabled since some arguments are self-explanatory and documenting them may only create noise
+  "D417",
+  "PERF203", # Should be disabled on Python 3.11 but Ruff seems to not do it yet
+  "PGH003",  # Should hopefully be obvious, otherwise too tedious
+  "S405",    # We use etree on trusted input and the check on the parsing entrypoints is enough
+  "FURB118", # Has false positives
+  "FURB140", # starmap is fine but comprehensions also are
+  "PLW2901", # There are enough reasons to want to reassign to loop vars
+  "PGH004",  # modules_service/modules/experimental_tmp/layout_engine/optimizer.py ignores all rules. To be fixed
+  "UP047",   # Pydantic classes don't respect it
+  "LOG015",  # We use root logger
+]
