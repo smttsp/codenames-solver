@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import chromadb
 import numpy as np
+from tqdm import tqdm
 
 from codenames_solver.config import CHROMA_DIR, COLLECTION_NAME
 
@@ -20,7 +21,8 @@ class VectorDB:
         return self._col.count()
 
     def upsert(self, words: list[str], embeddings: np.ndarray, batch_size: int = 5000) -> None:
-        for i in range(0, len(words), batch_size):
+        batches = range(0, len(words), batch_size)
+        for i in tqdm(batches, desc="Pushing to DB", unit="batch"):
             batch_words = words[i : i + batch_size]
             batch_embeddings = embeddings[i : i + batch_size].tolist()
             self._col.upsert(
