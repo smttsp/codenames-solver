@@ -54,6 +54,10 @@ class VectorDB:
                 break
         return items
 
+    def existing_ids(self, words: list[str]) -> set[str]:
+        result = self._col.get(ids=words, include=[])
+        return set(result["ids"])
+
     def get_embeddings(self, words: list[str]) -> tuple[list[str], np.ndarray]:
         result = self._col.get(ids=words, include=["embeddings"])
         found_ids: list[str] = result["ids"]

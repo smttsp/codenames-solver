@@ -34,16 +34,11 @@ def cli() -> None:
 
 
 @cli.command()
-@click.option("--force", is_flag=True, help="Re-embed even if DB already has words.")
-def train(force: bool) -> None:
+@click.option("--force", is_flag=True, help="Re-embed all words even if already in DB.")
+@click.option("--limit", default=500, show_default=True, help="Max words to train on (0 = no limit).")
+def train(force: bool, limit: int) -> None:
     """Embed the English word corpus and persist it to the local vector DB."""
     db = VectorDB()
-
-    if db.count() > 0 and not force:
-        click.echo(
-            f"DB already contains {db.count():,} words. Pass --force to retrain."
-        )
-        return
 
     click.echo("Downloading NLTK words corpus...")
     nltk.download("words", quiet=True)
@@ -57,15 +52,28 @@ def train(force: bool) -> None:
             if w.isalpha() and MIN_WORD_LEN <= len(w) <= MAX_WORD_LEN
         }
     )
-    click.echo(
-        f"Filtered corpus: {len(filtered):,} words. Starting embedding (this may take a few minutes)..."
-    )
-    filtered = filtered[:100]
+
+    if limit > 0:
+        filtered = filtered[:limit]
+
+    if force:
+        new_words = filtered
+    else:
+        already_in_db = db.existing_ids(filtered)
+        new_words = [w for w in filtered if w not in already_in_db]
+        if not new_words:
+            click.echo(f"All {len(filtered):,} words already in DB. Nothing to do.")
+            return
+        if already_in_db:
+            click.echo(f"Skipping {len(already_in_db):,} existing words, embedding {len(new_words):,} new words...")
+        else:
+            click.echo(f"Corpus: {len(new_words):,} words. Starting embedding (this may take a few minutes)...")
+
     embedder = Embedder()
     embeddings = embedder.encode(
-        filtered, batch_size=EMBEDDING_BATCH_SIZE, show_progress=True
+        new_words, batch_size=EMBEDDING_BATCH_SIZE, show_progress=True
     )
-    db.upsert(filtered, embeddings)
+    db.upsert(new_words, embeddings)
 
     click.echo(f"Done. DB now contains {db.count():,} words.")
 
