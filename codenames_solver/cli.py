@@ -35,15 +35,15 @@ def cli() -> None:
 
 @cli.command()
 @click.option("--force", is_flag=True, help="Re-embed all words even if already in DB.")
-@click.option("--limit", default=5000, show_default=True, help="Max words to train on (0 = no limit).")
+@click.option("--limit", default=35000, show_default=True, help="Max words to train on (0 = no limit).")
 def train(force: bool, limit: int) -> None:
     """Embed the English word corpus and persist it to the local vector DB."""
     db = VectorDB()
 
     click.echo("Downloading NLTK corpora...")
-    nltk.download("words", quiet=True)
-    nltk.download("brown", quiet=True)
-    from nltk.corpus import brown
+    for corpus in ("words", "brown", "reuters", "webtext"):
+        nltk.download(corpus, quiet=True)
+    from nltk.corpus import brown, reuters, webtext
     from nltk.corpus import words as nltk_words
     from nltk.probability import FreqDist
 
@@ -53,7 +53,13 @@ def train(force: bool, limit: int) -> None:
         if w.isalpha() and MIN_WORD_LEN <= len(w) <= MAX_WORD_LEN
     }
 
-    fdist = FreqDist(w.lower() for w in brown.words() if w.isalpha())
+    from itertools import chain
+
+    fdist = FreqDist(
+        w.lower()
+        for w in chain(brown.words(), reuters.words(), webtext.words())
+        if w.isalpha()
+    )
     filtered = sorted(valid_words, key=lambda w: fdist[w], reverse=True)
 
     if limit > 0:
