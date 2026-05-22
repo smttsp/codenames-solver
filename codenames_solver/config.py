@@ -17,6 +17,13 @@ MAX_WORD_LEN = 15
 
 ASSASSIN_PENALTY = 0.3  # extra additive penalty if assassin is closer than avoid
 RERANKER_MODEL = "claude-haiku-4-5-20251001"  # fast + cheap; swap for claude-sonnet-4-6 for higher quality
-# How many of the top avoid-word similarities a clue must beat to count as covering a target.
-# 1 = must beat every avoid word (strict); 2 = one avoid word may be closer (recommended).
-AVOID_DANGER_TOP_K = 2
+
+# Coverage margin: a target only counts as "covered" if its similarity beats the
+# max avoid/assassin similarity by this margin. Prevents phantom coverage.
+COVERAGE_MARGIN = 0.02
+
+# Drop candidate clues whose corpus frequency (Brown+Reuters+Webtext) is below
+# this floor. Filters out obscure/archaic words and proper-noun residue.
+MIN_CANDIDATE_FREQ = 5
+# Training-time floor (more lenient; the runtime filter still applies later).
+MIN_TRAINING_FREQ = 2
