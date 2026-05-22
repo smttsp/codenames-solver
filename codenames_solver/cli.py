@@ -3,7 +3,13 @@ from __future__ import annotations
 import click
 import nltk
 
-from codenames_solver.config import EMBEDDING_BATCH_SIZE, MAX_WORD_LEN, MIN_WORD_LEN
+from codenames_solver.config import (
+    EMBEDDING_BATCH_SIZE,
+    MAX_WORD_LEN,
+    MIN_TRAINING_FREQ,
+    MIN_WORD_LEN,
+)
+from codenames_solver.corpus import word_freq
 from codenames_solver.embedder import Embedder
 from codenames_solver.solver import Solver
 from codenames_solver.vectordb import VectorDB
@@ -45,26 +51,22 @@ def train(force: bool, limit: int) -> None:
     db = VectorDB()
 
     click.echo("Downloading NLTK corpora...")
-    for corpus in ("words", "brown", "reuters", "webtext"):
-        nltk.download(corpus, quiet=True)
-    from nltk.corpus import brown, reuters, webtext
+    nltk.download("words", quiet=True)
     from nltk.corpus import words as nltk_words
-    from nltk.probability import FreqDist
 
+    # Drop proper nouns: the NLTK words corpus capitalises them, so we filter
+    # before lowercasing. Also enforce length bounds.
     valid_words = {
         w.lower()
         for w in nltk_words.words()
-        if w.isalpha() and MIN_WORD_LEN <= len(w) <= MAX_WORD_LEN
+        if w.isalpha() and w[0].islower() and MIN_WORD_LEN <= len(w) <= MAX_WORD_LEN
     }
 
-    from itertools import chain
-
-    fdist = FreqDist(
-        w.lower()
-        for w in chain(brown.words(), reuters.words(), webtext.words())
-        if w.isalpha()
-    )
-    filtered = sorted(valid_words, key=lambda w: fdist[w], reverse=True)
+    # word_freq() downloads brown/reuters/webtext and builds the FreqDist.
+    fdist = word_freq()
+    # Frequency floor strips obscure / archaic dictionary residue.
+    valid_words = {w for w in valid_words if fdist.get(w, 0) >= MIN_TRAINING_FREQ}
+    filtered = sorted(valid_words, key=lambda w: fdist.get(w, 0), reverse=True)
 
     if limit > 0:
         filtered = filtered[:limit]

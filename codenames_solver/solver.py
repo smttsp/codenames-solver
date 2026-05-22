@@ -6,7 +6,12 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from codenames_solver.config import ASSASSIN_PENALTY, AVOID_DANGER_TOP_K
+from codenames_solver.config import (
+    ASSASSIN_PENALTY,
+    COVERAGE_MARGIN,
+    MIN_CANDIDATE_FREQ,
+)
+from codenames_solver.corpus import word_freq
 from codenames_solver.embedder import Embedder
 from codenames_solver.vectordb import VectorDB
 
@@ -24,9 +29,26 @@ class ClueSuggestion:
 
 @dataclass
 class _BoardEmbeddings:
-    target: np.ndarray
+    # Per-target stacks of constituent embeddings ("big ben" -> 2 rows).
+    target_groups: list[np.ndarray]
+    # One vector per target (mean of constituents, normalised) — used for retrieval.
+    target_centroids: np.ndarray
+    # All avoid / assassin constituents flattened.
     avoid: np.ndarray
     assassin: np.ndarray
+
+
+def _is_legal_clue(word: str, board_tokens: set[str]) -> bool:
+    """Reject clues that share a substring with any board word token.
+
+    Codenames forbids clues that contain (or are contained in) a board word.
+    We split multi-word board entries ("big ben") into tokens and check both
+    directions against every token.
+    """
+    for tok in board_tokens:
+        if word == tok or tok in word or word in tok:
+            return False
+    return True
 
 
 class Solver:
@@ -41,29 +63,56 @@ class Solver:
         avoid_words: list[str],
         assassin_words: list[str],
     ) -> _BoardEmbeddings:
-        all_words = target_words + avoid_words + assassin_words
-        embs = self.embedder.encode(all_words)
-        n_t, n_a = len(target_words), len(avoid_words)
+        target_parts = [w.split() for w in target_words]
+        avoid_parts = [w.split() for w in avoid_words]
+        assassin_parts = [w.split() for w in assassin_words]
+
+        flat: list[str] = []
+        for parts in target_parts + avoid_parts + assassin_parts:
+            flat.extend(parts)
+        embs = self.embedder.encode(flat)
+
+        idx = 0
+        target_groups: list[np.ndarray] = []
+        for parts in target_parts:
+            target_groups.append(embs[idx : idx + len(parts)])
+            idx += len(parts)
+
+        n_avoid = sum(len(p) for p in avoid_parts)
+        avoid_embs = embs[idx : idx + n_avoid]
+        idx += n_avoid
+
+        n_assassin = sum(len(p) for p in assassin_parts)
+        assassin_embs = embs[idx : idx + n_assassin]
+
+        dim = embs.shape[1]
+        target_centroids = np.zeros((len(target_words), dim), dtype=np.float32)
+        for i, group in enumerate(target_groups):
+            c = group.mean(axis=0)
+            c /= max(float(np.linalg.norm(c)), 1e-8)
+            target_centroids[i] = c
+
         return _BoardEmbeddings(
-            target=embs[:n_t],
-            avoid=embs[n_t : n_t + n_a],
-            assassin=embs[n_t + n_a :],
+            target_groups=target_groups,
+            target_centroids=target_centroids,
+            avoid=avoid_embs,
+            assassin=assassin_embs,
         )
 
     def _gather_candidates(
         self,
-        target_embs: np.ndarray,
+        target_centroids: np.ndarray,
         board_words: set[str],
         max_count: int,
         candidates_per_query: int,
     ) -> list[str]:
-        n_t = len(target_embs)
+        n_t = len(target_centroids)
         candidates: set[str] = set()
         for k in range(min(max_count, n_t), 0, -1):
             for indices in combinations(range(n_t), k):
-                subset = target_embs[list(indices)]
+                subset = target_centroids[list(indices)]
                 centroid = subset.mean(axis=0)
-                centroid /= np.linalg.norm(centroid)
+                centroid /= max(float(np.linalg.norm(centroid)), 1e-8)
                 results = self.db.query(
                     centroid, n_results=candidates_per_query, exclude=board_words
                 )
@@ -76,42 +125,40 @@ class Solver:
         cand_emb: np.ndarray,
         embs: _BoardEmbeddings,
         target_words: list[str],
-    ) -> ClueSuggestion:
-        t_sims = embs.target @ cand_emb
+    ) -> ClueSuggestion | None:
+        t_sims = np.array(
+            [float((g @ cand_emb).max()) for g in embs.target_groups],
+            dtype=np.float32,
+        )
 
-        raw_assassin = float((embs.assassin @ cand_emb).max()) if embs.assassin.size else 0.0
-        if embs.avoid.size:
-            avoid_sims = embs.avoid @ cand_emb
-            avoid_max = float(avoid_sims.max())
-            # Lenient threshold for coverage counting: ignore the single closest avoid word
-            # so one rogue avoid word doesn't prevent counting legitimate target coverage.
-            k = min(AVOID_DANGER_TOP_K, len(avoid_sims))
-            avoid_lenient = float(np.partition(avoid_sims, -k)[-k])
-        else:
-            avoid_max = 0.0
-            avoid_lenient = 0.0
-
-        # Coverage threshold is lenient (top-k avoid) to count more covered targets.
-        coverage_danger = max(avoid_lenient, raw_assassin)
-        # Score penalty uses strict max avoid so risky clues (e.g. HEAT near FIRE) rank lower.
-        score_danger = max(avoid_max, raw_assassin)
+        avoid_max = float((embs.avoid @ cand_emb).max()) if embs.avoid.size else 0.0
+        raw_assassin = (
+            float((embs.assassin @ cand_emb).max()) if embs.assassin.size else 0.0
+        )
+        danger = max(avoid_max, raw_assassin)
 
         order = np.argsort(-t_sims)
-
+        threshold = danger + COVERAGE_MARGIN
         best_k = 0
         for j in range(len(target_words)):
-            if float(t_sims[order[j]]) > coverage_danger:
+            if float(t_sims[order[j]]) > threshold:
                 best_k = j + 1
             else:
                 break
-        best_k = max(1, best_k)
 
-        best_covered = [target_words[int(order[i])] for i in range(best_k)]
-        avg_target_sim = float(t_sims[order[:best_k]].mean())
+        if best_k == 0:
+            return None
+
+        covered = [target_words[int(order[i])] for i in range(best_k)]
+        # Sum-based reward so multi-coverage actually wins; subtract per-target
+        # danger cost so risky clues don't ride high target sims.
+        sum_target_sim = float(t_sims[order[:best_k]].sum())
         assassin_extra = max(0.0, raw_assassin - avoid_max) * ASSASSIN_PENALTY
-        best_score = avg_target_sim - score_danger - assassin_extra
+        score = sum_target_sim - best_k * danger - assassin_extra
 
-        return ClueSuggestion(clue=word, count=best_k, target_words=best_covered, score=best_score)
+        return ClueSuggestion(
+            clue=word, count=best_k, target_words=covered, score=score
+        )
 
     def suggest(
         self,
@@ -127,21 +174,34 @@ class Solver:
         avoid_words = [w.lower() for w in avoid_words]
         assassin_words = [w.lower() for w in assassin_words]
         board_words = set(target_words + avoid_words + assassin_words)
+        # Token-level set: includes "big" and "ben" separately so the substring
+        # filter can match clues that collide with either half.
+        board_tokens = {tok for bw in board_words for tok in bw.split()}
 
         embs = self._encode_board(target_words, avoid_words, assassin_words)
         candidates = self._gather_candidates(
-            embs.target, board_words, max_count, candidates_per_query
+            embs.target_centroids, board_words, max_count, candidates_per_query
         )
+        if not candidates:
+            return []
 
+        fdist = word_freq()
+        candidates = [
+            w
+            for w in candidates
+            if _is_legal_clue(w, board_tokens)
+            and fdist.get(w, 0) >= MIN_CANDIDATE_FREQ
+        ]
         if not candidates:
             return []
 
         found_ids, cand_embs = self.db.get_embeddings(candidates)
-        suggestions = [
-            self._score_candidate(word, cand_emb, embs, target_words)
-            for word, cand_emb in zip(found_ids, cand_embs)
-        ]
-        suggestions.sort(key=lambda x: (-x.count, -x.score))
+        suggestions: list[ClueSuggestion] = []
+        for word, cand_emb in zip(found_ids, cand_embs):
+            s = self._score_candidate(word, cand_emb, embs, target_words)
+            if s is not None:
+                suggestions.append(s)
+        suggestions.sort(key=lambda x: -x.score)
 
         if self.reranker is not None:
             top_candidates = [s.clue for s in suggestions[:reranker_top_k]]
